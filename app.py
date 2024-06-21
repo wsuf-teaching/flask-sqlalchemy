@@ -1,13 +1,28 @@
-from flask import Flask
+from flask import Flask, jsonify, request
 from flask_migrate import Migrate
 from db import db
 from models.food import Food
+from models.user import User
+
+import flask_praetorian
+# only use cors in development
+import flask_cors
 
 def create_app():
     app = Flask(__name__)
     app.config["DEBUG"] = True
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///I://flaskdbproject1//data.db"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    # NEVER put config values like secret key here
+    app.config['SECRET_KEY']="blahblahblah"
+    app.config['JWT_ACCESS_LIFESPAN'] = {'hours': 24}
+    app.config['JWT_REFRESH_LIFESPAN'] = {'days': 30}
+    global guard
+    guard = flask_praetorian.Praetorian()
+    guard.init_app(app, User)
+    # only use cors in development
+    cors = flask_cors.CORS()
+    cors.init_app(app)
     db.init_app(app)
     return app
 
@@ -20,6 +35,67 @@ with app.app_context():
 @app.route('/')
 def index():
     return 'Hello, World!'
+
+@app.route('/foods', methods=['GET'])
+def get_all_foods():
+    foods = Food.get_all()
+    return jsonify([food.json() for food in foods]), 200
+
+@app.route('/food/<int:id>', methods=['GET'])
+def get_food_by_id(id):
+    food = Food.get_by_id(id)
+    # food = Food.query.get(id)
+    if food:
+        return food.json(), 200
+    else:
+        return jsonify({"message":"Food not found"}), 404
+    
+@app.route('/food', methods=['POST'])
+def create_food():
+    data = request.get_json()
+    new_food = Food(
+        name=data["name"],
+        description=data["description"],
+        price=data["price"],
+        image_url=data["image_url"]
+    )
+    db.session.add(new_food)
+    db.session.commit()
+    return new_food.json(),201
+
+@app.route('/food/<int:id>', methods=['PUT'])
+def update_food(id):
+    data = request.get_json()
+    food = Food.get_by_id(id)
+    if food:
+        food.name = data.get('name', food.name)
+        food.description = data.get('description', food.description)
+        food.price = data.get('price', food.price)
+        food.image_url = data.get('image_url', food.image_url)
+        db.session.commit()
+        return jsonify(food.json()),200
+    else:
+        return jsonify({"message":"Food not found"}), 404
+    
+@app.route('/food/<int:id>', methods=['DELETE'])
+def delete_food(id):
+    food = Food.get_by_id(id)
+    if food:
+        db.session.delete(food)
+        db.session.commit()
+        return jsonify({"message":"Food successfully deleted"}), 200
+    else:
+        return jsonify({"message":"Food not found"}), 404
+
+@app.route('/login', methods=['POST'])
+def login():
+    req = request.get_json()
+    username = req.get('username')
+    password = req.get('password')
+    user = guard.authenticate(username, password)
+    jwt_token = {"access_token":guard.encode_jwt_token(user)}
+    return jwt_token, 200
+
 
 def seed():
     food1 = Food(name="Pizza", description="Dish of italian origin",price=10.99,image_url="image1.jpg")
@@ -38,6 +114,11 @@ def seed():
     db.session.commit()
 
     return 'Seeded data'
+
+#def seed2():
+#    user = User(username="admin@example.com",password=guard.hash_password("12345"),roles="admin")
+#    db.session.add(user)
+#    db.session.commit()
 
 if __name__ == '__main__':
     app.run()
