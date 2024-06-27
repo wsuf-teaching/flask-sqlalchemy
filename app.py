@@ -3,6 +3,9 @@ from flask_migrate import Migrate
 from db import db
 from models.food import Food
 from models.user import User
+from models.order import Order
+from models.orderfood import OrderFood
+from models.address import Address
 
 import flask_praetorian
 # only use cors in development
@@ -124,6 +127,56 @@ def protected():
 @flask_praetorian.roles_required("admin")
 def admin_route():
     return {"message":f"admin only endpoint, current logged in user is {flask_praetorian.current_user().username}"}
+
+@app.route('/orders')
+def get_order():
+    orders = Order.get_all()
+    return jsonify([order.json() for order in orders])
+
+@app.route('/myorders')
+@flask_praetorian.auth_required
+def get_my_orders():
+    userid = flask_praetorian.current_user_id()
+    orders = Order.get_by_user_id(userid)
+    return jsonify([order.json() for order in orders])
+
+@app.route('/order', methods=['POST'])
+@flask_praetorian.auth_required
+def new_order():
+    req = request.get_json(force=True)
+
+    street = req.get('street')
+    city = req.get('city')
+    zip_code = req.get('zip')
+
+    items = req.get('items', [])
+    if not items:
+        return jsonify({"error": "No items in order"}), 400
+    
+    food_ids = [item['id'] for item in items]
+    existing_foods = Food.query.filter(Food.id.in_(food_ids)).all()
+    existing_food_ids = {food.id for food in existing_foods}
+
+    for item in items:
+        if item['id'] not in existing_food_ids:
+            return jsonify({"error": f"Food id {item['id']} does not exist"}), 400
+        
+    new_address = Address(street=street, city=city, zip=zip_code)
+    db.session.add(new_address)
+    db.session.commit()
+
+    user = flask_praetorian.current_user()
+    new_order = Order(user_id=user.id, address_id=new_address.id)
+    db.session.add(new_order)
+    db.session.commit()
+
+    for item in items:
+        order_food = OrderFood(order_id=new_order.id, food_id=item['id'], amount=item['amount'])
+        db.session.add(order_food)
+
+    db.session.commit()
+
+    return jsonify({"message": "Order created successfully"}), 201
 
 
 def seed():
