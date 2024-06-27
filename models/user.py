@@ -31,5 +31,6 @@ class User(db.Model):
     
     def get_custom_claims(self):
         return {
-            'name': self.username
+            'name': self.username,
+            'age': 66
         }

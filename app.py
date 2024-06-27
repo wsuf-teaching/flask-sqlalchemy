@@ -89,12 +89,41 @@ def delete_food(id):
 
 @app.route('/login', methods=['POST'])
 def login():
-    req = request.get_json()
+    req = request.get_json(force=True)
     username = req.get('username')
     password = req.get('password')
     user = guard.authenticate(username, password)
-    jwt_token = {"access_token":guard.encode_jwt_token(user)}
+    custom_claims = user.get_custom_claims()
+    jwt_token = {"access_token":guard.encode_jwt_token(user, sub=user.username, custom_claims=custom_claims)}
     return jwt_token, 200
+
+@app.route('/register', methods=['POST'])
+def register():
+    req = request.get_json(force=True)
+    username = req.get('username', None)
+    password = req.get('password', None)
+    if not username or not password:
+        return {"message":"Username and password are required"}, 400
+    existing_user = User.lookup(username)
+    if existing_user:
+        return {"message":"User already exists"}, 400
+    user = User(username=username,password=guard.hash_password(password),roles="")
+    db.session.add(user)
+    db.session.commit()
+    return {'message': 'User registered successfully'}, 201
+
+# protected route, authentication (logging in) should be required
+@app.route('/protected', methods=['GET'])
+@flask_praetorian.auth_required
+def protected():
+    # "Authorization: Bearer <your_token>"
+    return {"message":f"protected endpoint, current logged in user is {flask_praetorian.current_user().username}"}
+
+# admin only route
+@app.route('/adminonly', methods=['GET'])
+@flask_praetorian.roles_required("admin")
+def admin_route():
+    return {"message":f"admin only endpoint, current logged in user is {flask_praetorian.current_user().username}"}
 
 
 def seed():
